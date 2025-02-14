@@ -1,9 +1,10 @@
 import express, {type Request} from 'express';
+import 'dotenv/config';
 import { validate } from '../middlewares/validate';
 import { Restaurant, RestaurantSchema } from '../schemas/restaurant';
 import { initializeRedisClient } from '../utils/client';
 import { nanoid } from 'nanoid';
-import { cuisineKey, cuisinesKey, restaurantByRatingKey, restaurantCuisinesKeyById, restaurantKeyById, reviewDetailsById, reviewKeyById } from '../utils/keys';
+import { cuisineKey, cuisinesKey, restaurantByRatingKey, restaurantCuisinesKeyById, restaurantKeyById, reviewDetailsById, reviewKeyById, weatherKeyById } from '../utils/keys';
 import { errorResponse, successResponse } from '../utils/responses';
 import { checkRestaurantExists } from '../middlewares/checkRestaurantId';
 import { Review, ReviewSchema } from '../schemas/review';
@@ -53,6 +54,36 @@ router.post('/', validate(RestaurantSchema), async (req, res, next): Promise<any
       }),
     ])
     return successResponse(res, hashData, "Added new rastaurant");
+  } catch(err) {
+    next(err);
+  }
+});
+
+router.get('/:restaurantId/weather', checkRestaurantExists, async(req: Request<{ restaurantId: string}>, res, next): Promise<any> => {
+  const { restaurantId } = req.params;
+  try {
+    const client = await initializeRedisClient();
+    const weatherKey = weatherKeyById(restaurantId);
+    const cachedWeather = await client.get(weatherKey);
+    if (cachedWeather) {
+      console.log('Cache hit');
+      return successResponse(res, JSON.parse(cachedWeather), 'Weather found');
+    }
+    const restaurantKey = restaurantKeyById(restaurantId);
+    const coords = await client.hGet(restaurantKey, 'location');
+    if (!coords) {
+      return errorResponse(res, 404, 'Location not found for restaurant');
+    }
+    const [lon, lat] = coords.split(',');
+    const apiResponse = await fetch(`https://api.openweathermap.org/data/3.0/onecall/timemachine?lat=${lat}&lon=${lon}&appid=${process.env.WEATHER_API_KEY}`);
+    if (apiResponse.status === 200) {
+      const json = await apiResponse.json();
+      await client.set(weatherKey, JSON.stringify(json), {
+        EX: 60 * 60,
+      });
+      return successResponse(res, json, 'Weather found');
+    }
+    return errorResponse(res, 500, 'Error fetching');
   } catch(err) {
     next(err);
   }
