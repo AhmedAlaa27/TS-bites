@@ -9,7 +9,7 @@ const app = express();
 app.use(express.json());
 
 app.use('/api/restaurants', restaurantRouter);
-app.use('api/cuisines', cuisinesRouter);
+app.use('/api/cuisines', cuisinesRouter);
 
 app.use(errorHandler);
 

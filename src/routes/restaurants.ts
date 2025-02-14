@@ -3,7 +3,7 @@ import { validate } from '../middlewares/validate';
 import { Restaurant, RestaurantSchema } from '../schemas/restaurant';
 import { initializeRedisClient } from '../utils/client';
 import { nanoid } from 'nanoid';
-import { restaurantKeyById, reviewDetailsById, reviewKeyById } from '../utils/keys';
+import { cuisineKey, cuisinesKey, restaurantCuisinesKeyById, restaurantKeyById, reviewDetailsById, reviewKeyById } from '../utils/keys';
 import { errorResponse, successResponse } from '../utils/responses';
 import { checkRestaurantExists } from '../middlewares/checkRestaurantId';
 import { Review, ReviewSchema } from '../schemas/review';
@@ -17,8 +17,14 @@ router.post('/', validate(RestaurantSchema), async (req, res, next): Promise<any
     const id = nanoid();
     const restaurantKey = restaurantKeyById(id);
     const hashData = { id, name: data.name, location: data.location };
-    const addResult = await client.hSet(restaurantKey, hashData);
-    console.log(`Added ${addResult} fields`);
+    await Promise.all([
+      ...data.cuisines.map(cuisine => Promise.all([
+        client.sAdd(cuisinesKey, cuisine),
+        client.sAdd(cuisineKey(cuisine), id),
+        client.sAdd(restaurantCuisinesKeyById(id), cuisine),
+      ])),
+      client.hSet(restaurantKey, hashData),
+    ])
     return successResponse(res, hashData, "Added new rastaurant");
   } catch(err) {
     next(err);
@@ -90,11 +96,12 @@ router.get('/:restaurantId', checkRestaurantExists, async(req: Request<{ restaur
   try {
     const client = await initializeRedisClient();
     const restaurantKey = restaurantKeyById(restaurantId);
-    const [viewCount, restaurant] = await Promise.all([
+    const [viewCount, restaurant, cuisines] = await Promise.all([
       client.hIncrBy(restaurantKey, 'viewCount', 1), 
-      client.hGetAll(restaurantKey)
+      client.hGetAll(restaurantKey),
+      client.sMembers(restaurantCuisinesKeyById(restaurantId))
     ]);
-    return successResponse(res, restaurant, "Restaurant found");
+    return successResponse(res, {...restaurant, cuisines}, "Restaurant found");
   } catch(err) {
     next(err);
   }
